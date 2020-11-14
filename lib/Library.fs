@@ -1,6 +1,5 @@
 ﻿module EventPersistent.Persistent
 
-open LiteDB
 open System.Text.Json
 open System.Text.Json.Serialization
 
@@ -13,7 +12,16 @@ type Wrapper = { id: int; value: string }
 let private serialize x = JsonSerializer.Serialize(x, options)
 let private deserialize (s: string) = JsonSerializer.Deserialize(s, options)
 
-let create (db: LiteDatabase, name: string, init: 's, f: 's -> 'msg -> 's) =
+type ICollection<'a> =
+    abstract Insert: 'a -> unit
+    abstract FindGreatThen : string * int -> 'a seq
+
+type IDatabse =
+    abstract GetCollection: string -> ICollection<'c>
+    abstract BeginTrans: unit -> unit
+    abstract Commit: unit -> unit
+
+let create (db: IDatabse, name: string, init: 's, f: 's -> 'msg -> 's) =
     let col = db.GetCollection<Wrapper>(name)
     let index = ref 0
     let state = ref init
@@ -23,7 +31,7 @@ let create (db: LiteDatabase, name: string, init: 's, f: 's -> 'msg -> 's) =
             db.BeginTrans() |> ignore
 
             let prevs =
-                col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
+                col.FindGreatThen("_id",  !index)
 
             for aw in prevs do
                 let a = aw.value

@@ -39,7 +39,7 @@ open FrameworkExample
 [<Fact>]
 let test () =
     use db =
-        new LiteDB.LiteDatabase(new MemoryStream())
+        new LiteDBWrapper.Wrapper(new LiteDB.LiteDatabase(new MemoryStream()))
 
     async {
         let reducer =
