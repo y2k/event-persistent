@@ -10,7 +10,7 @@ let init () =
     { mutex = new SemaphoreSlim(1)
       xs = ref [] }
 
-let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
+let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) (compare: 'state -> 'state -> bool) =
     let state = ref initState
 
     let update es =
@@ -29,7 +29,9 @@ let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
 
             for u in !t.xs do
                 u es
-
             t.mutex.Release() |> ignore
-            return oldState
+
+            if (compare oldState state') then
+                return failwith "???"
+            else return oldState
         }
