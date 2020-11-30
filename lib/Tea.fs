@@ -51,10 +51,11 @@ let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
                 u es
 
             t.mutex.Release() |> ignore
+            t.mailbox.Post Notify
             return oldState
         }
 
-let make2 (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
+let makeWithWait (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
     let state = ref initState
 
     let update es =
@@ -75,6 +76,7 @@ let make2 (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) 
                 u es
 
             t.mutex.Release() |> ignore
+            t.mailbox.Post Notify
             return oldState
         }
 
