@@ -51,7 +51,10 @@ let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
                 u es
 
             t.mutex.Release() |> ignore
-            t.mailbox.Post Notify
+
+            if not <| List.isEmpty es then
+                t.mailbox.Post Notify
+
             return oldState
         }
 
