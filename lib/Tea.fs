@@ -3,7 +3,7 @@ module EventPersistent.Tea
 open System.Threading
 
 type private Cmd =
-    | Cmd of AsyncReplyChannel<unit>
+    | ListenForUpdate of AsyncReplyChannel<unit>
     | Notify
 
 type 'e t =
@@ -23,7 +23,7 @@ let init () =
 
                       while true do
                           match! inbox.Receive() with
-                          | Cmd r -> pendingEvents := r :: !pendingEvents
+                          | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
                           | Notify ->
                               for r in !pendingEvents do
                                   r.Reply()
@@ -55,6 +55,10 @@ let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
             return oldState
         }
 
+let waitForChanges (t: 'event t) =
+    t.mailbox.PostAndAsyncReply ListenForUpdate
+
+[<System.Obsolete>]
 let makeWithWait (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
     let state = ref initState
 
@@ -88,7 +92,7 @@ let makeWithWait (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> '
             t.mutex.Release() |> ignore
 
             if not !invalidated then
-                do! t.mailbox.PostAndAsyncReply Cmd
+                do! t.mailbox.PostAndAsyncReply ListenForUpdate
                 do! waitForChanged f
         }
 
