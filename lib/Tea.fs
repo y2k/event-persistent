@@ -1,22 +1,19 @@
 module EventPersistent.Tea
 
-open System.Threading
+type 'event UpdateHolder =
+    abstract member Dispatch : ('state -> 'state * 'event list) -> unit
 
 type private 'event Cmd =
     | RegisterUpdate of ('event list -> unit)
+    | Update of (unit -> 'event list) * AsyncReplyChannel<unit>
     | ListenForUpdate of AsyncReplyChannel<unit>
-    | Notify
 
 type 'e t =
     private
-        { mutex: SemaphoreSlim
-          mailbox: MailboxProcessor<'e Cmd>
-          updateFs: ('e list -> unit) list ref }
+        { mailbox : MailboxProcessor<'e Cmd> }
 
 let init () =
-    { mutex = new SemaphoreSlim(1)
-      updateFs = ref []
-      mailbox =
+    { mailbox =
           MailboxProcessor.Start
               (fun inbox ->
                   async {
@@ -25,44 +22,38 @@ let init () =
 
                       while true do
                           match! inbox.Receive() with
-                          | RegisterUpdate update -> updates := update :: !updates
-                          | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
-                          | Notify ->
+                          | Update (update, reply) ->
+                              let newEvents = update ()
+
+                              for u in !updates do
+                                  u newEvents
+
+                              reply.Reply()
+
                               for r in !pendingEvents do
                                   r.Reply()
                                   pendingEvents := []
+                          | RegisterUpdate update -> updates := update :: !updates
+                          | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
                   }) }
 
-let private dispatch state t (f : 'state -> 'state * 'event list) =
-    async {
-        do! t.mutex.WaitAsync() |> Async.AwaitTask
-
-        let oldState = !state
-        let state', es = f oldState
-        state := state'
-
-        for u in !t.updateFs do
-            u es
-
-        t.mutex.Release() |> ignore
-
-        if not <| List.isEmpty es then
-            t.mailbox.Post Notify
-
-        return oldState
-    }
-
-let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
+let make (t : 'event t) (initState : 'state) (merge : 'state -> 'event -> 'state) =
     let state = ref initState
-    let update events =
+
+    let afterUpdate events =
         for e in events do
             state := merge !state e
 
-    t.mailbox.Post <| RegisterUpdate update
-    
-    t.updateFs := update :: !t.updateFs
+    t.mailbox.Post <| RegisterUpdate afterUpdate
 
-    dispatch state t
+    fun (f : 'state -> 'state * 'event list) ->
+        let update () =
+            let newState, newEvents = f !state
+            state := newState
+            newEvents
 
-let waitForChanges (t: 'event t) =
-    t.mailbox.PostAndAsyncReply ListenForUpdate
+        t.mailbox.PostAndAsyncReply(fun r -> Update(update, r))
+
+let waitForChanges (t : 'event t) =
+    t.mailbox.PostAndTryAsyncReply(ListenForUpdate, 60_000)
+    |> Async.Ignore

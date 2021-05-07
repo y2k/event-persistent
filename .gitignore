@@ -3,3 +3,4 @@ obj/
 .ionide/
 *.fsx
 .idea/
+*.user
