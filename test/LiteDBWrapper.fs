@@ -15,7 +15,7 @@ type Wrapper(db: ILiteDatabase) =
     interface IDisposable with
         member _.Dispose() = db.Dispose()
 
-    interface IDatabse with
+    interface IDatabase with
         member _.BeginTrans() = db.BeginTrans() |> ignore
         member _.Commit() = db.Commit() |> ignore
 
