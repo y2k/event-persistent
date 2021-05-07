@@ -2,14 +2,15 @@ module EventPersistent.Tea
 
 open System.Threading
 
-type private Cmd =
+type private 'event Cmd =
+    | RegisterUpdate of ('event list -> unit)
     | ListenForUpdate of AsyncReplyChannel<unit>
     | Notify
 
 type 'e t =
     private
         { mutex: SemaphoreSlim
-          mailbox: MailboxProcessor<Cmd>
+          mailbox: MailboxProcessor<'e Cmd>
           updateFs: ('e list -> unit) list ref }
 
 let init () =
@@ -20,9 +21,11 @@ let init () =
               (fun inbox ->
                   async {
                       let pendingEvents : AsyncReplyChannel<unit> list ref = ref []
+                      let updates : _ list ref = ref []
 
                       while true do
                           match! inbox.Receive() with
+                          | RegisterUpdate update -> updates := update :: !updates
                           | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
                           | Notify ->
                               for r in !pendingEvents do
@@ -30,7 +33,7 @@ let init () =
                                   pendingEvents := []
                   }) }
 
-let private dispatch state t f =
+let private dispatch state t (f : 'state -> 'state * 'event list) =
     async {
         do! t.mutex.WaitAsync() |> Async.AwaitTask
 
@@ -51,11 +54,12 @@ let private dispatch state t f =
 
 let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
     let state = ref initState
-
-    let update es =
-        for e in es do
+    let update events =
+        for e in events do
             state := merge !state e
 
+    t.mailbox.Post <| RegisterUpdate update
+    
     t.updateFs := update :: !t.updateFs
 
     dispatch state t
