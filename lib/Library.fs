@@ -16,12 +16,12 @@ type ICollection<'a> =
     abstract Insert: 'a -> unit
     abstract FindGreatThen : string * int -> 'a seq
 
-type IDatabse =
+type IDatabase =
     abstract GetCollection: string -> ICollection<'c>
     abstract BeginTrans: unit -> unit
     abstract Commit: unit -> unit
 
-let create (db: IDatabse, name: string, init: 's, f: 's -> 'msg -> 's) =
+let create (db: IDatabase, name: string, init: 's, f: 's -> 'msg -> 's) =
     let col = db.GetCollection<Wrapper>(name)
     let index = ref 0
     let state = ref init

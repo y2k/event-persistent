@@ -1,102 +1,59 @@
 module EventPersistent.Tea
 
-open System.Threading
+type 'event UpdateHolder =
+    abstract member Dispatch : ('state -> 'state * 'event list) -> unit
 
-type private Cmd =
+type private 'event Cmd =
+    | RegisterUpdate of ('event list -> unit)
+    | Update of (unit -> 'event list) * AsyncReplyChannel<unit>
     | ListenForUpdate of AsyncReplyChannel<unit>
-    | Notify
 
 type 'e t =
     private
-        { mutex: SemaphoreSlim
-          mailbox: MailboxProcessor<Cmd>
-          xs: ('e list -> unit) list ref }
+        { mailbox : MailboxProcessor<'e Cmd> }
 
 let init () =
-    { mutex = new SemaphoreSlim(1)
-      xs = ref []
-      mailbox =
+    { mailbox =
           MailboxProcessor.Start
               (fun inbox ->
                   async {
-                      let pendingEvents: AsyncReplyChannel<unit> list ref = ref []
+                      let pendingEvents : AsyncReplyChannel<unit> list ref = ref []
+                      let updates : _ list ref = ref []
 
                       while true do
                           match! inbox.Receive() with
-                          | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
-                          | Notify ->
+                          | Update (update, reply) ->
+                              let newEvents = update ()
+
+                              for u in !updates do
+                                  u newEvents
+
+                              reply.Reply()
+
                               for r in !pendingEvents do
                                   r.Reply()
                                   pendingEvents := []
+                          | RegisterUpdate update -> updates := update :: !updates
+                          | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
                   }) }
 
-let make (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
+let make (t : 'event t) (initState : 'state) (merge : 'state -> 'event -> 'state) =
     let state = ref initState
 
-    let update es =
-        for e in es do
+    let afterUpdate events =
+        for e in events do
             state := merge !state e
 
-    t.xs := update :: !t.xs
+    t.mailbox.Post <| RegisterUpdate afterUpdate
 
-    fun f ->
-        async {
-            do! t.mutex.WaitAsync() |> Async.AwaitTask
+    fun (f : 'state -> 'state * 'event list) ->
+        let update () =
+            let newState, newEvents = f !state
+            state := newState
+            newEvents
 
-            let oldState = !state
-            let (state', es) = f oldState
-            state := state'
+        t.mailbox.PostAndAsyncReply(fun r -> Update(update, r))
 
-            for u in !t.xs do
-                u es
-
-            t.mutex.Release() |> ignore
-
-            if not <| List.isEmpty es then
-                t.mailbox.Post Notify
-
-            return oldState
-        }
-
-let waitForChanges (t: 'event t) =
-    t.mailbox.PostAndAsyncReply ListenForUpdate
-
-[<System.Obsolete>]
-let makeWithWait (t: 'event t) (initState: 'state) (merge: 'state -> 'event -> 'state) =
-    let state = ref initState
-
-    let update es =
-        for e in es do
-            state := merge !state e
-
-    t.xs := update :: !t.xs
-
-    let updateState f =
-        async {
-            do! t.mutex.WaitAsync() |> Async.AwaitTask
-
-            let oldState = !state
-            let (state', es) = f oldState
-            state := state'
-
-            for u in !t.xs do
-                u es
-
-            t.mutex.Release() |> ignore
-            t.mailbox.Post Notify
-            return oldState
-        }
-
-    let rec waitForChanged f =
-        async {
-            let invalidated = ref false
-            do! t.mutex.WaitAsync() |> Async.AwaitTask
-            invalidated := f !state
-            t.mutex.Release() |> ignore
-
-            if not !invalidated then
-                do! t.mailbox.PostAndAsyncReply ListenForUpdate
-                do! waitForChanged f
-        }
-
-    updateState, waitForChanged
+let waitForChanges (t : 'event t) =
+    t.mailbox.PostAndTryAsyncReply(ListenForUpdate, 60_000)
+    |> Async.Ignore
