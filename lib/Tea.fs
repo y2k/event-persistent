@@ -1,7 +1,7 @@
 module EventPersistent.Tea
 
-type 'event UpdateHolder =
-    abstract member Dispatch : ('state -> 'state * 'event list) -> unit
+type IReducer<'state, 'event> =
+    abstract member Invoke : ('state -> 'state * 'event list * 'result) -> 'result Async
 
 type private 'event Cmd =
     | RegisterUpdate of ('event list -> unit)
@@ -37,7 +37,7 @@ let init () =
                           | ListenForUpdate r -> pendingEvents := r :: !pendingEvents
                   }) }
 
-let make (t : 'event t) (initState : 'state) (merge : 'state -> 'event -> 'state) =
+let make (t : 'event t) (initState : 'state) (merge : 'state -> 'event -> 'state) : IReducer<'state, 'event> =
     let state = ref initState
 
     let afterUpdate events =
@@ -46,13 +46,20 @@ let make (t : 'event t) (initState : 'state) (merge : 'state -> 'event -> 'state
 
     t.mailbox.Post <| RegisterUpdate afterUpdate
 
-    fun (f : 'state -> 'state * 'event list) ->
-        let update () =
-            let newState, newEvents = f !state
-            state := newState
-            newEvents
+    { new IReducer<'state, 'event> with
+        member _.Invoke(f : _ -> _ * _ * 'r) =
+            async {
+                let outResult : 'r option ref = ref None
 
-        t.mailbox.PostAndAsyncReply(fun r -> Update(update, r))
+                let update () =
+                    let newState, newEvents, result = f !state
+                    outResult := Some result
+                    state := newState
+                    newEvents
+
+                do! t.mailbox.PostAndAsyncReply(fun r -> Update(update, r))
+                return !outResult |> Option.get
+            } }
 
 let waitForChanges (t : 'event t) =
     t.mailbox.PostAndTryAsyncReply(ListenForUpdate, 60_000)

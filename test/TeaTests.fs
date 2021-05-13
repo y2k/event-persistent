@@ -13,18 +13,18 @@ type Event =
 let test () =
     let random = System.Random()
 
-    let work1 dispatch =
+    let work1 (dispatch : Tea.IReducer<_, _>) =
         async {
             for i in [ 1 .. 5 ] do
                 do! Async.Sleep(random.Next 100)
-                do! dispatch (fun (a, b) -> (a + i, b), [ Added1 i ])
+                do! dispatch.Invoke(fun (a, b) -> (a + i, b), [ Added1 i ], ())
         }
 
-    let work2 dispatch =
+    let work2 (dispatch : Tea.IReducer<_, _>) =
         async {
             for i in [ 1 .. 5 ] do
                 do! Async.Sleep(random.Next 100)
-                do! dispatch (fun (a, b) -> (a + i, b), [ Added2 i ])
+                do! dispatch.Invoke(fun (a, b) -> (a + i, b), [ Added2 i ], ())
         }
 
     async {
@@ -56,20 +56,20 @@ let test () =
         let actual = ref (0, 0)
 
         do!
-            dispatch1
+            dispatch1.Invoke
                 (fun state ->
                     actual := state
-                    state, [])
+                    state, [], ())
 
         test <@ !actual = (15, 15) @>
 
         let actual = ref (0, 0)
 
         do!
-            dispatch2
+            dispatch2.Invoke
                 (fun state ->
                     actual := state
-                    state, [])
+                    state, [], ())
 
         test <@ !actual = (15, 15) @>
     }
